@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONPATH=/app
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    
+  dashboard:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./dashboard:/app/dashboard
+    depends_on:
+      - backend
+    environment:
+      - API_BASE=http://backend:8000
+    command: streamlit run dashboard/app.py --server.port=8501 --server.address=0.0.0.0
+    
+  monitoring:
+    build: .
+    volumes:
+      - ./Scripts:/app/Scripts
+      - ./logs:/app/logs
+    depends_on:
+      - backend
+    command: python Scripts/monitor_performance.py
+    profiles: ["monitoring"]  # Optional service
+
+
+
+
+
+
+
+# Dockerfile
+
+
+
+# FROM python:3.9-slim
+
+# # Install system dependencies
+# RUN apt-get update && apt-get install -y \
+#     build-essential \
+#     curl \
+#     software-properties-common \
+#     git \
+#     && rm -rf /var/lib/apt/lists/*
+
+# # Set working directory
+# WORKDIR /app
+
+# # Copy requirements
+# COPY requirements.txt .
+
+# # Install Python dependencies
+# RUN pip install --no-cache-dir -r requirements.txt
+
+# # Copy application code
+# COPY . .
+
+# # Create necessary directories
+# RUN mkdir -p models data logs
+
+# # Expose ports
+# EXPOSE 8000 8501
+
+# # Create startup script
+# COPY start.sh .
+# RUN chmod +x start.sh
+
+# CMD ["./start.sh"]
+
+
+
+
+

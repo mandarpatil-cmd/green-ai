@@ -1,0 +1,30 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="green-ai-agent",
+    version="0.1.0",
+    packages=find_packages(),
+    install_requires=[
+        "fastapi==0.115.0",
+        "uvicorn[standard]==0.24.0",
+        "pydantic==2.11.7",
+        "streamlit==1.28.0",
+        "torch==2.8.0",
+        "transformers==4.35.0",
+        "datasets==2.14.0",
+        "scikit-learn==1.3.2",
+        "pandas==2.3.2",
+        "numpy==2.1.2",
+        "codecarbon==3.0.4",
+        "psutil==5.9.6",
+        "GPUtil==1.4.0",
+        "matplotlib==3.8.2",
+        "seaborn==0.13.0",
+        "plotly==5.17.0",
+        "pytest==7.4.3",
+        "requests==2.32.5",
+        "redis==5.0.1",
+        "gunicorn==21.2.0",
+    ],
+    python_requires=">=3.8",
+)
