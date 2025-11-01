@@ -35,4 +35,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "green_metrics.sqlite3"
 MODELS_PATH = ROOT / "models"
 EMAIL_SAMPLES_PATH = ROOT / "data" / "email_samples.txt"
+FASTTEXT_MODEL_PATH = MODELS_PATH / "ft_model.bin"
+SKLEARN_MODEL_PATH = MODELS_PATH / "sk_model.joblib"
 

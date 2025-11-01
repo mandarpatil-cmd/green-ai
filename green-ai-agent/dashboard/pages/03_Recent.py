@@ -1,17 +1,9 @@
 import requests
 import pandas as pd
 import streamlit as st
-import os
 
 
-def get_api_base():
-    try:
-        return st.secrets["API_BASE"]
-    except Exception:
-        return os.getenv("API_BASE", "http://127.0.0.1:8000")
-
-
-API_BASE = get_api_base()
+API_BASE = "http://127.0.0.1:8000"
 st.title("Recent Runs")
 
 limit = st.slider("How many rows", 10, 200, 50, 10)

@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 import time
+import os
 import sqlite3
 import hashlib
 from datetime import datetime
@@ -12,17 +13,30 @@ from backend.config import DB_PATH, EMAIL_CATEGORIES
 
 from backend.config_prod import MAX_EMAIL_LENGTH  # NEW (or from backend.config if you move it there)
 
-# Initialize the intelligent agent (with error handling)
+# Initialize components with error handling
+orchestrator = None
+sklearn_model = None
+ORCHESTRATOR_READY = False
+SKLEARN_READY = False
+
 try:
-    # Import inside try so missing module doesn't crash startup
     from backend.agent_logic import AgentOrchestrator  # type: ignore
     orchestrator = AgentOrchestrator()
     ORCHESTRATOR_READY = True
 except Exception as e:
     print(f"Warning: Could not initialize orchestrator: {e}")
+
+try:
+    from backend.models import get_sklearn_model
+    sklearn_model = get_sklearn_model()
+    SKLEARN_READY = bool(sklearn_model)
+    if not SKLEARN_READY:
+        print("Warning: Sklearn model not found - will use orchestrator/fallback")
+except Exception as e:
+    print(f"Warning: Could not load sklearn model: {e}")
+
+if not ORCHESTRATOR_READY and not SKLEARN_READY:
     print("Starting in basic mode (keyword fallback only)...")
-    orchestrator = None
-    ORCHESTRATOR_READY = False
 
 app = FastAPI(title="Green AI Email Classification API", version="2.0")
 
@@ -132,6 +146,7 @@ def health_check():
     return {
         "status": "healthy",
         "orchestrator_ready": ORCHESTRATOR_READY,
+        "sklearn_ready": SKLEARN_READY,
         "timestamp": datetime.now().isoformat(),
         "version": "2.0",
     }
@@ -147,17 +162,106 @@ def classify_email(request: EmailClassificationRequest):
 
     start_time = time.time()
     try:
-        if ORCHESTRATOR_READY and orchestrator:
-            email_data = {
-                "text": request.text,
-                "subject": request.subject,
-                "sender": request.sender,
-                "preferences": request.preferences,
-                "user_id": request.user_id,
-            }
-            result = orchestrator.process_email(email_data)
+        email_data = {
+            "text": request.text,
+            "subject": request.subject,
+            "sender": request.sender,
+            "preferences": request.preferences,
+            "user_id": request.user_id,
+        }
+
+        # Priority selection: optionally prefer sklearn via env var or per-request preference
+        # Request-level override: request.preferences.get("use_model") can be 'sklearn', 'orchestrator', or 'auto'
+        req_pref = None
+        try:
+            req_pref = (request.preferences or {}).get("use_model")
+        except Exception:
+            req_pref = None
+
+        if isinstance(req_pref, str) and req_pref.lower() == "sklearn":
+            prefer_sklearn = True
+        elif isinstance(req_pref, str) and req_pref.lower() == "orchestrator":
+            prefer_sklearn = False
         else:
-            result = simple_classification(request.text)
+            prefer_sklearn = os.getenv("PREFER_SKLEARN", "false").lower() in ("1", "true", "yes")
+
+        # Priority options:
+        # - If prefer_sklearn is True: sklearn -> orchestrator -> simple
+        # - Otherwise (default): orchestrator -> sklearn -> simple
+        if prefer_sklearn:
+            if SKLEARN_READY and sklearn_model:
+                # try sklearn first (handled below)
+                pass
+            elif ORCHESTRATOR_READY and orchestrator:
+                result = orchestrator.process_email(email_data)
+            else:
+                result = simple_classification(request.text)
+        else:
+            # Default: orchestrator first
+            if ORCHESTRATOR_READY and orchestrator:
+                result = orchestrator.process_email(email_data)
+            else:
+                # fall through to sklearn / simple below
+                pass
+
+        # If result wasn't set above, try sklearn if available
+        if ('result' not in locals() or result is None) and SKLEARN_READY and sklearn_model:
+            try:
+                # sklearn_model expected to be a Pipeline with predict / predict_proba
+                pred = sklearn_model.predict([request.text])
+                # handle predict_proba if available
+                proba = None
+                try:
+                    proba = sklearn_model.predict_proba([request.text])[0]
+                except Exception:
+                    proba = None
+
+                prediction = pred[0] if isinstance(pred, (list, tuple)) else pred
+
+                if proba is not None and hasattr(sklearn_model, "classes_"):
+                    classes = list(sklearn_model.classes_)
+                    all_predictions = [
+                        {"category": str(c), "confidence": float(p)}
+                        for c, p in zip(classes, proba)
+                    ]
+                    confidence = float(max(proba)) if len(proba) > 0 else 0.0
+                else:
+                    all_predictions = [{"category": str(prediction), "confidence": 1.0}]
+                    confidence = 1.0
+
+                result = {
+                    "predicted_category": str(prediction),
+                    "confidence": confidence,
+                    "all_predictions": all_predictions,
+                    "model_used": "sklearn_tfidf_logreg",
+                    "escalated": False,
+                    "escalation_attempted": False,
+                    "energy_metrics": {
+                        "co2_emissions_g": 0.002,
+                        "processing_time_seconds": 0.05,
+                        "energy_efficiency_score": 0.9,
+                    },
+                    "ai_insights": {
+                        "environmental_impact": {
+                            "co2_this_classification": 0.002,
+                            "impact_level": "low",
+                        },
+                        "accuracy_assessment": {
+                            "confidence_level": "high" if confidence >= 0.85 else "medium",
+                            "should_review": confidence < 0.7,
+                        },
+                        "suggestions": ["Using sklearn TF-IDF + LogisticRegression pipeline"],
+                    },
+                    "timestamp": time.time(),
+                    "email_text": request.text,
+                }
+            except Exception as e:
+                print(f"Sklearn prediction error: {e}")
+                result = simple_classification(request.text)
+        else:
+            # If sklearn wasn't used or available, and result still unset, ensure fallback
+            if 'result' not in locals() or result is None:
+                result = simple_classification(request.text)
 
         processing_time_api = time.time() - start_time
         processing_time = float(
